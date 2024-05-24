@@ -1,0 +1,244 @@
+import pygame, time
+
+
+PLAYING = 'playing'
+PAUSED = 'paused'
+STOPPED = 'stopped'
+
+NORTHWEST = 'northwest'
+NORTH = 'north'
+NORTHEAST = 'northeast'
+WEST = 'west'
+CENTER = 'center'
+EAST = 'east'
+SOUTHWEST = 'southwest'
+SOUTH = 'south'
+SOUTHEAST = 'southeast'
+
+
+class PygAnimation(object):
+    def __init__(self, frames, loop=True):
+        self._images = []
+        self._durations = []
+        self._startTimes = None
+      
+        self._transformedImages = []
+        
+        self._state = STOPPED
+        self._loop = loop
+        self._rate = 1.0
+        self._visibility = True
+
+        self._playingStartTime = 0
+        self._pausedStartTime = 0
+
+        if frames != '_copy':
+            self.numFrames = len(frames)
+            assert self.numFrames > 0, 'Must contain at least one frame.'
+            for i in range(self.numFrames):
+               
+                frame = frames[i]
+                assert type(frame) in (list, tuple) and len(frame) == 2, 'Frame %s has incorrect format.' % (i)
+                assert type(frame[0]) in (str, pygame.Surface), 'Frame %s image must be a string filename or a pygame.Surface' % (i)
+                assert frame[1] > 0, 'Frame %s duration must be greater than zero.' % (i)
+                if type(frame[0]) == str:
+                    frame = (pygame.image.load(frame[0]), frame[1])
+                self._images.append(frame[0])
+                self._durations.append(frame[1])
+            self._startTimes = self._getStartTimes()
+
+
+    def _getStartTimes(self):
+        startTimes = [0]
+        for i in range(self.numFrames):
+            startTimes.append(startTimes[-1] + self._durations[i])
+        return startTimes
+
+
+    def reverse(self):
+        self.elapsed = self._startTimes[-1] - self.elapsed
+        self._images.reverse()
+        self._transformedImages.reverse()
+        self._durations.reverse()
+
+
+    def getCopy(self):
+        return self.getCopies(1)[0]
+
+
+    def getCopies(self, numCopies=1):
+        retval = []
+        for i in range(numCopies):
+            newAnim = PygAnimation('_copy', loop=self.loop)
+            newAnim._images = self._images[:]
+            newAnim._transformedImages = self._transformedImages[:]
+            newAnim._durations = self._durations[:]
+            newAnim._startTimes = self._startTimes[:]
+            newAnim.numFrames = self.numFrames
+            retval.append(newAnim)
+        return retval
+
+
+    def blit(self, destSurface, dest):
+        if self.isFinished():
+            self.state = STOPPED
+        if not self.visibility or self.state == STOPPED:
+            return
+        frameNum = findStartTime(self._startTimes, self.elapsed)
+        destSurface.blit(self.getFrame(frameNum), dest)
+
+
+    def getFrame(self, frameNum):
+        if self._transformedImages == []:
+            return self._images[frameNum]
+        else:
+            return self._transformedImages[frameNum]
+
+
+    def getCurrentFrame(self):
+        # Returns the pygame.Surface object of the frame that would be drawn
+        # if the blit() method were called right now. If there is a transformed
+        # version of the frame, it will return that one.
+        return self.getFrame(self.currentFrameNum)
+
+
+    def clearTransforms(self):
+        self._transformedImages = []
+
+    def makeTransformsPermanent(self):
+        self._images = [pygame.Surface(surfObj.get_size(), 0, surfObj) for surfObj in self._transformedImages]
+        for i in range(len(self._transformedImages)):
+            self._images[i].blit(self._transformedImages[i], (0,0))
+
+    def blitFrameNum(self, frameNum, destSurface, dest):
+        if self.isFinished():
+            self.state = STOPPED
+        if not self.visibility or self.state == STOPPED:
+            return
+        destSurface.blit(self.getFrame(frameNum), dest)
+
+
+    def blitFrameAtTime(self, elapsed, destSurface, dest):
+        if self.isFinished():
+            self.state = STOPPED
+        if not self.visibility or self.state == STOPPED:
+            return
+        frameNum = findStartTime(self._startTimes, elapsed)
+        destSurface.blit(self.getFrame(frameNum), dest)
+
+
+    def isFinished(self):
+        return not self.loop and self.elapsed >= self._startTimes[-1]
+
+
+    def play(self, startTime=None):
+
+        if startTime is None:
+            startTime = time.time()
+
+        if self._state == PLAYING:
+            if self.isFinished():
+                self._playingStartTime = startTime
+        elif self._state == STOPPED:
+            self._playingStartTime = startTime
+        elif self._state == PAUSED:
+            self._playingStartTime = startTime - (self._pausedStartTime - self._playingStartTime)
+        self._state = PLAYING
+
+
+    def pause(self, startTime=None):
+
+        if startTime is None:
+            startTime = time.time()
+
+        if self._state == PAUSED:
+            return
+        elif self._state == PLAYING:
+            self._pausedStartTime = startTime
+        elif self._state == STOPPED:
+            rightNow = time.time()
+            self._playingStartTime = rightNow
+            self._pausedStartTime = rightNow
+        self._state = PAUSED
+
+
+    def stop(self):
+
+        if self._state == STOPPED:
+            return # do nothing
+        self._state = STOPPED
+
+
+    def togglePause(self):
+
+        if self._state == PLAYING:
+            if self.isFinished():
+                self.play()
+            else:
+                self.pause()
+        elif self._state in (PAUSED, STOPPED):
+            self.play()
+
+
+    def areFramesSameSize(self):
+        width, height = self.getFrame(0).get_size()
+        for i in range(len(self._images)):
+            if self.getFrame(i).get_size() != (width, height):
+                return False
+        return True
+
+
+    def getMaxSize(self):
+        frameWidths = []
+        frameHeights = []
+        for i in range(len(self._images)):
+            frameWidth, frameHeight = self._images[i].get_size()
+            frameWidths.append(frameWidth)
+            frameHeights.append(frameHeight)
+        maxWidth = max(frameWidths)
+        maxHeight = max(frameHeights)
+
+        return (maxWidth, maxHeight)
+
+    def _propGetVisibility(self):
+        return self._visibility
+
+    def _propSetVisibility(self, visibility):
+        self._visibility = bool(visibility)
+
+    visibility = property(_propGetVisibility, _propSetVisibility)
+
+    def _propSetElapsed(self, elapsed):
+        elapsed += 0.00001 # done to compensate for rounding errors
+
+      
+        if self._loop:
+            elapsed = elapsed % self._startTimes[-1]
+        else:
+            elapsed = getInBetweenValue(0, elapsed, self._startTimes[-1])
+
+        rightNow = time.time()
+        self._playingStartTime = rightNow - (elapsed * self.rate)
+
+        if self.state in (PAUSED, STOPPED):
+            self.state = PAUSED # if stopped, then set to paused
+            self._pausedStartTime = rightNow
+
+
+    def _propGetElapsed(self):
+        if self._state == STOPPED:
+            return 0
+
+        if self._state == PLAYING:
+            elapsed = (time.time() - self._playingStartTime) * self.rate
+        elif self._state == PAUSED:
+            elapsed = (self._pausedStartTime - self._playingStartTime) * self.rate
+        if self._loop:
+            elapsed = elapsed % self._startTimes[-1]
+        else:
+            elapsed = getInBetweenValue(0, elapsed, self._startTimes[-1])
+        elapsed += 0.00001
+        return elapsed
+
+    elapsed = property(_propGetElapsed, _propSetElapsed)
+
